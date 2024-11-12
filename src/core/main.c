@@ -33,8 +33,7 @@ __asmcall int main ( void ) {
 
 	/* Some devices take an unreasonably long time to initialise */
 	printf ( "\nInitializing network devices...\n" );
-	startup();
-	printf ( "ok\n" );
+    startup();
 
 	/* Attempt to boot */
 	if ( ( rc = ipxe ( NULL ) ) != 0 )

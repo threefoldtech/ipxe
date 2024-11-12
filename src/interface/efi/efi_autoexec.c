@@ -25,12 +25,16 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <string.h>
 #include <errno.h>
+#include <ipxe/timer.h>
 #include <ipxe/image.h>
-#include <ipxe/init.h>
+#include <ipxe/netdevice.h>
+#include <ipxe/uri.h>
 #include <ipxe/efi/efi.h>
+#include <ipxe/efi/efi_utils.h>
 #include <ipxe/efi/efi_autoexec.h>
-#include <ipxe/efi/Protocol/SimpleFileSystem.h>
-#include <ipxe/efi/Guid/FileInfo.h>
+#include <ipxe/efi/mnpnet.h>
+#include <usr/imgmgmt.h>
+#include <usr/sync.h>
 
 /** @file
  *
@@ -38,169 +42,169 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
  *
  */
 
-/** Autoexec script filename */
-#define AUTOEXEC_FILENAME L"autoexec.ipxe"
+/** Timeout for autoexec script downloads */
+#define EFI_AUTOEXEC_TIMEOUT ( 2 * TICKS_PER_SEC )
 
 /** Autoexec script image name */
-#define AUTOEXEC_NAME "autoexec.ipxe"
+#define EFI_AUTOEXEC_NAME "autoexec.ipxe"
 
-/** Autoexec script (if any) */
-static void *efi_autoexec;
-
-/** Autoexec script length */
-static size_t efi_autoexec_len;
+/** An EFI autoexec script loader */
+struct efi_autoexec_loader {
+	/** Required protocol GUID */
+	EFI_GUID *protocol;
+	/**
+	 * Load autoexec script
+	 *
+	 * @v handle		Handle on which protocol was found
+	 * @v image		Image to fill in
+	 * @ret rc		Return status code
+	 */
+	int ( * load ) ( EFI_HANDLE handle, struct image **image );
+};
 
 /**
- * Load autoexec script
+ * Load autoexec script from filesystem
  *
- * @v device		Device handle
+ * @v handle		Simple filesystem protocol handle
+ * @v image		Image to fill in
  * @ret rc		Return status code
  */
-int efi_autoexec_load ( EFI_HANDLE device ) {
-	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
-	static wchar_t name[] = AUTOEXEC_FILENAME;
-	union {
-		void *interface;
-		EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs;
-	} u;
-	struct {
-		EFI_FILE_INFO info;
-		CHAR16 name[ sizeof ( name ) / sizeof ( name[0] ) ];
-	} info;
-	EFI_FILE_PROTOCOL *root;
-	EFI_FILE_PROTOCOL *file;
-	UINTN size;
-	VOID *data;
-	EFI_STATUS efirc;
+static int efi_autoexec_filesystem ( EFI_HANDLE handle, struct image **image ) {
+	EFI_HANDLE device = efi_loaded_image->DeviceHandle;
 	int rc;
 
-	/* Sanity check */
-	assert ( efi_autoexec == NULL );
-	assert ( efi_autoexec_len == 0 );
-
-	/* Open simple file system protocol */
-	if ( ( efirc = bs->OpenProtocol ( device,
-					  &efi_simple_file_system_protocol_guid,
-					  &u.interface, efi_image_handle,
-					  device,
-					  EFI_OPEN_PROTOCOL_GET_PROTOCOL ))!=0){
-		rc = -EEFI ( efirc );
-		DBGC ( device, "EFI %s has no filesystem instance: %s\n",
-		       efi_handle_name ( device ), strerror ( rc ) );
-		goto err_filesystem;
+	/* Check that we were loaded from a filesystem */
+	if ( handle != device ) {
+		DBGC ( device, "EFI %s is not the file system handle\n",
+		       efi_handle_name ( device ) );
+		return -ENOTTY;
 	}
 
-	/* Open root directory */
-	if ( ( efirc = u.fs->OpenVolume ( u.fs, &root ) ) != 0 ) {
-		rc = -EEFI ( efirc );
-		DBGC ( device, "EFI %s could not open volume: %s\n",
-		       efi_handle_name ( device ), strerror ( rc ) );
-		goto err_volume;
-	}
+	/* Try loading from loaded image directory, if supported */
+	if ( ( rc = imgacquire ( "file:" EFI_AUTOEXEC_NAME,
+				 EFI_AUTOEXEC_TIMEOUT, image ) ) == 0 )
+		return 0;
 
-	/* Open autoexec script */
-	if ( ( efirc = root->Open ( root, &file, name,
-				    EFI_FILE_MODE_READ, 0 ) ) != 0 ) {
-		rc = -EEFI ( efirc );
-		DBGC ( device, "EFI %s has no %ls: %s\n",
-		       efi_handle_name ( device ), name, strerror ( rc ) );
-		goto err_open;
-	}
+	/* Try loading from root directory, if supported */
+	if ( ( rc = imgacquire ( "file:/" EFI_AUTOEXEC_NAME,
+				 EFI_AUTOEXEC_TIMEOUT, image ) ) == 0 )
+		return 0;
 
-	/* Get file information */
-	size = sizeof ( info );
-	if ( ( efirc = file->GetInfo ( file, &efi_file_info_id, &size,
-				       &info ) ) != 0 ) {
-		rc = -EEFI ( efirc );
-		DBGC ( device, "EFI %s could not get %ls info: %s\n",
-		       efi_handle_name ( device ), name, strerror ( rc ) );
-		goto err_getinfo;
-	}
-	size = info.info.FileSize;
-
-	/* Ignore zero-length files */
-	if ( ! size ) {
-		rc = -EINVAL;
-		DBGC ( device, "EFI %s has zero-length %ls\n",
-		       efi_handle_name ( device ), name );
-		goto err_empty;
-	}
-
-	/* Allocate temporary copy */
-	if ( ( efirc = bs->AllocatePool ( EfiBootServicesData, size,
-					  &data ) ) != 0 ) {
-		rc = -EEFI ( efirc );
-		DBGC ( device, "EFI %s could not allocate %ls: %s\n",
-		       efi_handle_name ( device ), name, strerror ( rc ) );
-		goto err_alloc;
-	}
-
-	/* Read file */
-	if ( ( efirc = file->Read ( file, &size, data ) ) != 0 ) {
-		rc = -EEFI ( efirc );
-		DBGC ( device, "EFI %s could not read %ls: %s\n",
-		       efi_handle_name ( device ), name, strerror ( rc ) );
-		goto err_read;
-	}
-
-	/* Record autoexec script */
-	efi_autoexec = data;
-	efi_autoexec_len = size;
-	data = NULL;
-	DBGC ( device, "EFI %s found %ls\n",
-	       efi_handle_name ( device ), name );
-
-	/* Success */
-	rc = 0;
-
- err_read:
-	if ( data )
-		bs->FreePool ( data );
- err_alloc:
- err_empty:
- err_getinfo:
-	file->Close ( file );
- err_open:
-	root->Close ( root );
- err_volume:
-	bs->CloseProtocol ( device, &efi_simple_file_system_protocol_guid,
-			    efi_image_handle, device );
- err_filesystem:
 	return rc;
 }
 
 /**
- * Register autoexec script
+ * Load autoexec script via temporary network device
  *
+ * @v handle		Managed network protocol service binding handle
+ * @v image		Image to fill in
+ * @ret rc		Return status code
  */
-static void efi_autoexec_startup ( void ) {
-	EFI_BOOT_SERVICES *bs = efi_systab->BootServices;
+static int efi_autoexec_network ( EFI_HANDLE handle, struct image **image ) {
 	EFI_HANDLE device = efi_loaded_image->DeviceHandle;
-	const char *name = AUTOEXEC_NAME;
-	struct image *image;
+	struct net_device *netdev;
+	int rc;
 
-	/* Do nothing if we have no autoexec script */
-	if ( ! efi_autoexec )
-		return;
-
-	/* Create autoexec image */
-	image = image_memory ( name, virt_to_user ( efi_autoexec ),
-			       efi_autoexec_len );
-	if ( ! image ) {
-		DBGC ( device, "EFI %s could not create %s\n",
-		       efi_handle_name ( device ), name );
-		return;
+	/* Create temporary network device */
+	if ( ( rc = mnptemp_create ( handle, &netdev ) ) != 0 ) {
+		DBGC ( device, "EFI %s could not create net device: %s\n",
+		       efi_handle_name ( device ), strerror ( rc ) );
+		goto err_create;
 	}
-	DBGC ( device, "EFI %s registered %s\n",
-	       efi_handle_name ( device ), name );
 
-	/* Free temporary copy */
-	bs->FreePool ( efi_autoexec );
-	efi_autoexec = NULL;
+	/* Do nothing unless we have a usable current working URI */
+	if ( ! cwuri ) {
+		DBGC ( device, "EFI %s has no current working URI\n",
+		       efi_handle_name ( device ) );
+		rc = -ENOTTY;
+		goto err_cwuri;
+	}
+
+	/* Open network device */
+	if ( ( rc = netdev_open ( netdev ) ) != 0 ) {
+		DBGC ( device, "EFI %s could not open net device: %s\n",
+		       efi_handle_name ( device ), strerror ( rc ) );
+		goto err_open;
+	}
+
+	/* Attempt download */
+	rc = imgacquire ( EFI_AUTOEXEC_NAME, EFI_AUTOEXEC_TIMEOUT, image );
+	if ( rc != 0 ) {
+		DBGC ( device, "EFI %s could not download %s: %s\n",
+		       efi_handle_name ( device ), EFI_AUTOEXEC_NAME,
+		       strerror ( rc ) );
+	}
+
+	/* Ensure network exchanges have completed */
+	sync ( EFI_AUTOEXEC_TIMEOUT );
+
+ err_open:
+ err_cwuri:
+	mnptemp_destroy ( netdev );
+ err_create:
+	return rc;
 }
 
-/** Autoexec script startup function */
-struct startup_fn efi_autoexec_startup_fn __startup_fn ( STARTUP_NORMAL ) = {
-	.name = "efi_autoexec",
-	.startup = efi_autoexec_startup,
+/** Autoexec script loaders */
+static struct efi_autoexec_loader efi_autoexec_loaders[] = {
+	{
+		.protocol = &efi_simple_file_system_protocol_guid,
+		.load = efi_autoexec_filesystem,
+	},
+	{
+		.protocol = &efi_managed_network_service_binding_protocol_guid,
+		.load = efi_autoexec_network,
+	},
 };
+
+/**
+ * Load autoexec script
+ *
+ * @ret rc		Return status code
+ */
+int efi_autoexec_load ( void ) {
+	EFI_HANDLE device = efi_loaded_image->DeviceHandle;
+	EFI_HANDLE handle;
+	struct efi_autoexec_loader *loader;
+	struct image *image;
+	unsigned int i;
+	int rc;
+
+	/* Use first applicable loader */
+	for ( i = 0 ; i < ( sizeof ( efi_autoexec_loaders ) /
+			    sizeof ( efi_autoexec_loaders[0] ) ) ; i ++ ) {
+
+		/* Locate required protocol for this loader */
+		loader = &efi_autoexec_loaders[i];
+		if ( ( rc = efi_locate_device ( device, loader->protocol,
+						&handle, 0 ) ) != 0 ) {
+			DBGC ( device, "EFI %s found no %s: %s\n",
+			       efi_handle_name ( device ),
+			       efi_guid_ntoa ( loader->protocol ),
+			       strerror ( rc ) );
+			continue;
+		}
+		DBGC ( device, "EFI %s found %s on ",
+		       efi_handle_name ( device ),
+		       efi_guid_ntoa ( loader->protocol ) );
+		DBGC ( device, "%s\n", efi_handle_name ( handle ) );
+
+		/* Try loading */
+		if ( ( rc = loader->load ( handle, &image ) ) != 0 )
+			return rc;
+
+		/* Discard zero-length images */
+		if ( ! image->len ) {
+			DBGC ( device, "EFI %s discarding zero-length %s\n",
+			       efi_handle_name ( device ), image->name );
+			unregister_image ( image );
+			return -ENOENT;
+		}
+
+		DBGC ( device, "EFI %s loaded %s (%zd bytes)\n",
+		       efi_handle_name ( device ), image->name, image->len );
+		return 0;
+	}
+
+	return -ENOENT;
+}

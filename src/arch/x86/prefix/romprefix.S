@@ -54,7 +54,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL )
 #define BUSTYPE "PCIR"
 #endif
 
-	.text
+	.section ".note.GNU-stack", "", @progbits
 	.code16
 	.arch i386
 	.section ".prefix", "ax", @progbits
@@ -161,7 +161,7 @@ pnpheader:
 
 /* Manufacturer string */
 mfgstr:
-	.asciz	"http://ipxe.org"
+	.asciz	"https://ipxe.org"
 	.size mfgstr, . - mfgstr
 
 /* Product string
@@ -607,7 +607,7 @@ get_pmm_decompress_to:
  * strings PRODUCT_NAME and PRODUCT_SHORT_NAME in config/branding.h.
  *
  * While nothing in the GPL prevents you from removing all references
- * to iPXE or http://ipxe.org, we prefer you not to do so.
+ * to iPXE or https://ipxe.org, we prefer you not to do so.
  *
  * If you have an OEM-mandated branding requirement that cannot be
  * satisfied simply by defining PRODUCT_NAME and PRODUCT_SHORT_NAME,

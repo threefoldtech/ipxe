@@ -8,6 +8,10 @@ SYMBOL_PREFIX	= _ipxe__
 #
 CFLAGS		+= -UNVALGRIND
 
+# The Linux linker script
+#
+LDSCRIPT	= scripts/linux.lds
+
 # Use a two-stage link
 #
 LDFLAGS		+= -r -d
@@ -25,6 +29,9 @@ NON_AUTO_MEDIA = linux
 # Compiler flags for building host API wrapper
 #
 LINUX_CFLAGS	+= -Os -idirafter include -DSYMBOL_PREFIX=$(SYMBOL_PREFIX)
+ifneq ($(SYSROOT),)
+LINUX_CFLAGS	+= --sysroot=$(SYSROOT)
+endif
 
 # Check for libslirp
 #

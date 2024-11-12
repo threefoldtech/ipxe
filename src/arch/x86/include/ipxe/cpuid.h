@@ -33,11 +33,17 @@ struct x86_features {
 /** CPUID extended function */
 #define CPUID_EXTENDED 0x80000000UL
 
+/** CPUID hypervisor function */
+#define CPUID_HYPERVISOR 0x40000000UL
+
 /** Get vendor ID and largest standard function */
 #define CPUID_VENDOR_ID 0x00000000UL
 
 /** Get standard features */
 #define CPUID_FEATURES 0x00000001UL
+
+/** RDRAND instruction is supported */
+#define CPUID_FEATURES_INTEL_ECX_RDRAND 0x40000000UL
 
 /** Hypervisor is present */
 #define CPUID_FEATURES_INTEL_ECX_HYPERVISOR 0x80000000UL
