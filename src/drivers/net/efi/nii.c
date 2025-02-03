@@ -30,6 +30,7 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 #include <errno.h>
 #include <ipxe/netdevice.h>
 #include <ipxe/ethernet.h>
+#include <ipxe/if_ether.h>
 #include <ipxe/umalloc.h>
 #include <ipxe/efi/efi.h>
 #include <ipxe/efi/efi_driver.h>
@@ -998,6 +999,12 @@ static int nii_transmit ( struct net_device *netdev,
 		return 0;
 	}
 
+	/* Pad to minimum Ethernet length, to work around underlying
+	 * drivers that do not correctly handle frame padding
+	 * themselves.
+	 */
+	iob_pad ( iobuf, ETH_ZLEN );
+
 	/* Construct parameter block */
 	memset ( &cpb, 0, sizeof ( cpb ) );
 	cpb.FrameAddr = ( ( intptr_t ) iobuf->data );
@@ -1032,8 +1039,9 @@ static void nii_poll_tx ( struct net_device *netdev, unsigned int stat ) {
 	if ( stat & PXE_STATFLAGS_GET_STATUS_NO_TXBUFS_WRITTEN )
 		return;
 
-	/* Sanity check */
-	assert ( nii->txbuf != NULL );
+	/* Ignore spurious completions reported by some devices */
+	if ( ! nii->txbuf )
+		return;
 
 	/* Complete transmission */
 	iobuf = nii->txbuf;
@@ -1131,7 +1139,7 @@ static void nii_poll ( struct net_device *netdev ) {
 	/* Get status */
 	op = NII_OP ( PXE_OPCODE_GET_STATUS,
 		      ( PXE_OPFLAGS_GET_INTERRUPT_STATUS |
-			( nii->txbuf ? PXE_OPFLAGS_GET_TRANSMITTED_BUFFERS : 0)|
+			PXE_OPFLAGS_GET_TRANSMITTED_BUFFERS |
 			( nii->media ? PXE_OPFLAGS_GET_MEDIA_STATUS : 0 ) ) );
 	if ( ( stat = nii_issue_db ( nii, op, &db, sizeof ( db ) ) ) < 0 ) {
 		rc = -EIO_STAT ( stat );
@@ -1141,8 +1149,7 @@ static void nii_poll ( struct net_device *netdev ) {
 	}
 
 	/* Process any TX completions */
-	if ( nii->txbuf )
-		nii_poll_tx ( netdev, stat );
+	nii_poll_tx ( netdev, stat );
 
 	/* Process any RX completions */
 	nii_poll_rx ( netdev );

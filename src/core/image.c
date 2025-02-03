@@ -56,8 +56,15 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 /** List of registered images */
 struct list_head images = LIST_HEAD_INIT ( images );
 
+/** Image selected for execution */
+struct image_tag selected_image __image_tag = {
+	.name = "SELECTED",
+};
+
 /** Currently-executing image */
-struct image *current_image;
+struct image_tag current_image __image_tag = {
+	.name = "CURRENT",
+};
 
 /** Current image trust requirement */
 static int require_trusted_images = 0;
@@ -72,8 +79,13 @@ static int require_trusted_images_permanent = 0;
  */
 static void free_image ( struct refcnt *refcnt ) {
 	struct image *image = container_of ( refcnt, struct image, refcnt );
+	struct image_tag *tag;
 
 	DBGC ( image, "IMAGE %s freed\n", image->name );
+	for_each_table_entry ( tag, IMAGE_TAGS ) {
+		if ( tag->image == image )
+			tag->image = NULL;
+	}
 	free ( image->name );
 	free ( image->cmdline );
 	uri_put ( image->uri );
@@ -122,10 +134,13 @@ int image_set_uri ( struct image *image, struct uri *uri ) {
 	int rc;
 
 	/* Set name, if image does not already have one */
-	if ( uri->path && ( ! ( image->name && image->name[0] ) ) ) {
-		name = basename ( ( char * ) uri->path );
-		if ( ( rc = image_set_name ( image, name ) ) != 0 )
-			return rc;
+	if ( ! ( image->name && image->name[0] ) ) {
+		name = ( uri->path ? uri->path : uri->opaque );
+		if ( name ) {
+			name = basename ( ( char * ) name );
+			if ( ( rc = image_set_name ( image, name ) ) != 0 )
+				return rc;
+		}
 	}
 
 	/* Update image URI */
@@ -155,6 +170,25 @@ int image_set_name ( struct image *image, const char *name ) {
 	image->name = name_copy;
 
 	return 0;
+}
+
+/**
+ * Strip dot suffix from image name, if present
+ *
+ * @v image		Image
+ * @ret sep		Position of old dot separator, or NULL
+ */
+char * image_strip_suffix ( struct image *image ) {
+	char *dot;
+
+	/* Locate and strip suffix, if present */
+	if ( image->name &&
+	     ( ( dot = strrchr ( image->name, '.' ) ) != NULL ) ) {
+		*dot = '\0';
+		return dot;
+	}
+
+	return NULL;
 }
 
 /**
@@ -261,12 +295,6 @@ int register_image ( struct image *image ) {
 			return rc;
 	}
 
-	/* Avoid ending up with multiple "selected" images on
-	 * re-registration
-	 */
-	if ( image_find_selected() )
-		image->flags &= ~IMAGE_SELECTED;
-
 	/* Add to image list */
 	image_get ( image );
 	image->flags |= IMAGE_REGISTERED;
@@ -321,6 +349,23 @@ struct image * find_image ( const char *name ) {
 }
 
 /**
+ * Find image by tag
+ *
+ * @v tag		Image tag
+ * @ret image		Executable image, or NULL
+ */
+struct image * find_image_tag ( struct image_tag *tag ) {
+	struct image *image;
+
+	for_each_image ( image ) {
+		if ( tag->image == image )
+			return image;
+	}
+
+	return NULL;
+}
+
+/**
  * Execute image
  *
  * @v image		Executable image
@@ -346,13 +391,13 @@ int image_exec ( struct image *image ) {
 	if ( image->uri )
 		churi ( image->uri );
 
-	/* Preserve record of any currently-running image */
-	saved_current_image = current_image;
+	/* Set as currently running image */
+	saved_current_image = image_tag ( image, &current_image );
 
 	/* Take out a temporary reference to the image, so that it
 	 * does not get freed when temporarily unregistered.
 	 */
-	current_image = image_get ( image );
+	image_get ( image );
 
 	/* Check that this image can be executed */
 	if ( ! ( image->type && image->type->exec ) ) {
@@ -419,7 +464,7 @@ int image_exec ( struct image *image ) {
 	image_put ( image );
 
 	/* Restore previous currently-running image */
-	current_image = saved_current_image;
+	image_tag ( saved_current_image, &current_image );
 
 	/* Reset current working directory */
 	churi ( old_cwuri );
@@ -442,7 +487,7 @@ int image_exec ( struct image *image ) {
  * registered until the currently-executing image returns.
  */
 int image_replace ( struct image *replacement ) {
-	struct image *image = current_image;
+	struct image *image = current_image.image;
 	int rc;
 
 	/* Sanity check */
@@ -478,35 +523,15 @@ int image_replace ( struct image *replacement ) {
  * @ret rc		Return status code
  */
 int image_select ( struct image *image ) {
-	struct image *tmp;
-
-	/* Unselect all other images */
-	for_each_image ( tmp )
-		tmp->flags &= ~IMAGE_SELECTED;
 
 	/* Check that this image can be executed */
 	if ( ! ( image->type && image->type->exec ) )
 		return -ENOEXEC;
 
 	/* Mark image as selected */
-	image->flags |= IMAGE_SELECTED;
+	image_tag ( image, &selected_image );
 
 	return 0;
-}
-
-/**
- * Find selected image
- *
- * @ret image		Executable image, or NULL
- */
-struct image * image_find_selected ( void ) {
-	struct image *image;
-
-	for_each_image ( image ) {
-		if ( image->flags & IMAGE_SELECTED )
-			return image;
-	}
-	return NULL;
 }
 
 /**

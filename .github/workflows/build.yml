@@ -12,7 +12,7 @@ jobs:
         run: |
           sudo chown $(id -un) /var/cache/apt/archives
       - name: Cache packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: /var/cache/apt/archives/*.deb
           key: apt-cache-${{ github.run_id }}-${{ github.run_attempt }}
@@ -32,14 +32,14 @@ jobs:
     needs: cache
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Cache permissions
         run: |
           sudo chown $(id -un) /var/cache/apt/archives
       - name: Cache packages
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: /var/cache/apt/archives/*.deb
           key: apt-cache-${{ github.run_id }}-${{ github.run_attempt }}
@@ -49,7 +49,8 @@ jobs:
           sudo apt update
           sudo apt install -y -o Acquire::Retries=50 \
                            mtools syslinux isolinux \
-                           libc6-dev-i386 libc6-dbg:i386 valgrind
+                           libc6-dev-i386 valgrind \
+                           libgcc-s1:i386 libc6-dbg:i386
       - name: Build (BIOS)
         run: |
           make -j 4 -C src
@@ -67,14 +68,14 @@ jobs:
     needs: cache
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Cache permissions
         run: |
           sudo chown $(id -un) /var/cache/apt/archives
       - name: Cache packages
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: /var/cache/apt/archives/*.deb
           key: apt-cache-${{ github.run_id }}-${{ github.run_attempt }}
@@ -96,14 +97,14 @@ jobs:
     needs: cache
     steps:
       - name: Check out code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Cache permissions
         run: |
           sudo chown $(id -un) /var/cache/apt/archives
       - name: Cache packages
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: /var/cache/apt/archives/*.deb
           key: apt-cache-${{ github.run_id }}-${{ github.run_attempt }}

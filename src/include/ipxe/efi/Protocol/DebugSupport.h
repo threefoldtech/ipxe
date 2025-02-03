@@ -615,11 +615,34 @@ typedef struct {
 #define EXCEPT_RISCV_STORE_AMO_ACCESS_FAULT        7
 #define EXCEPT_RISCV_ENV_CALL_FROM_UMODE           8
 #define EXCEPT_RISCV_ENV_CALL_FROM_SMODE           9
-#define EXCEPT_RISCV_ENV_CALL_FROM_HMODE           10
+#define EXCEPT_RISCV_ENV_CALL_FROM_VS_MODE         10
 #define EXCEPT_RISCV_ENV_CALL_FROM_MMODE           11
+#define EXCEPT_RISCV_INST_ACCESS_PAGE_FAULT        12
+#define EXCEPT_RISCV_LOAD_ACCESS_PAGE_FAULT        13
+#define EXCEPT_RISCV_14                            14
+#define EXCEPT_RISCV_STORE_ACCESS_PAGE_FAULT       15
+#define EXCEPT_RISCV_16                            16
+#define EXCEPT_RISCV_17                            17
+#define EXCEPT_RISCV_18                            18
+#define EXCEPT_RISCV_19                            19
+#define EXCEPT_RISCV_INST_GUEST_PAGE_FAULT         20
+#define EXCEPT_RISCV_LOAD_GUEST_PAGE_FAULT         21
+#define EXCEPT_RISCV_VIRTUAL_INSTRUCTION           22
+#define EXCEPT_RISCV_STORE_GUEST_PAGE_FAULT        23
+#define EXCEPT_RISCV_MAX_EXCEPTIONS                (EXCEPT_RISCV_STORE_GUEST_PAGE_FAULT)
 
-#define EXCEPT_RISCV_SOFTWARE_INT  0x0
-#define EXCEPT_RISCV_TIMER_INT     0x1
+///
+/// RISC-V processor exception types for interrupts.
+///
+#define EXCEPT_RISCV_IS_IRQ(x)     ((x & 0x8000000000000000UL) != 0)
+#define EXCEPT_RISCV_IRQ_INDEX(x)  (x & 0x7FFFFFFFFFFFFFFFUL)
+#define EXCEPT_RISCV_IRQ_0                 0x8000000000000000UL
+#define EXCEPT_RISCV_IRQ_SOFT_FROM_SMODE   0x8000000000000001UL
+#define EXCEPT_RISCV_IRQ_SOFT_FROM_VSMODE  0x8000000000000002UL
+#define EXCEPT_RISCV_IRQ_SOFT_FROM_MMODE   0x8000000000000003UL
+#define EXCEPT_RISCV_IRQ_4                 0x8000000000000004UL
+#define EXCEPT_RISCV_IRQ_TIMER_FROM_SMODE  0x8000000000000005UL
+#define EXCEPT_RISCV_MAX_IRQS              (EXCEPT_RISCV_IRQ_INDEX(EXCEPT_RISCV_IRQ_TIMER_FROM_SMODE))
 
 typedef struct {
   UINT64    X0;
@@ -654,11 +677,28 @@ typedef struct {
   UINT64    X29;
   UINT64    X30;
   UINT64    X31;
+  UINT64    SEPC;
+  UINT32    SSTATUS;
+  UINT32    STVAL;
 } EFI_SYSTEM_CONTEXT_RISCV64;
 
-//
-// LoongArch processor exception types.
-//
+///
+/// LoongArch processor exception types.
+///
+/// The exception types is located in the CSR ESTAT
+/// register offset 16 bits, width 6 bits.
+///
+/// If you want to register an exception hook, you can
+/// shfit the number left by 16 bits, and the exception
+/// handler will know the types.
+///
+/// For example:
+/// mCpu->CpuRegisterInterruptHandler (
+///         mCpu,
+///         (EXCEPT_LOONGARCH_PPI << CSR_ESTAT_EXC_SHIFT),
+///         PpiExceptionHandler
+///         );
+///
 #define EXCEPT_LOONGARCH_INT   0
 #define EXCEPT_LOONGARCH_PIL   1
 #define EXCEPT_LOONGARCH_PIS   2
@@ -678,11 +718,22 @@ typedef struct {
 #define EXCEPT_LOONGARCH_SXD   16
 #define EXCEPT_LOONGARCH_ASXD  17
 #define EXCEPT_LOONGARCH_FPE   18
-#define EXCEPT_LOONGARCH_TBR   64 // For code only, there is no such type in the ISA spec, the TLB refill is defined for an independent exception.
+#define EXCEPT_LOONGARCH_WPE   19
+#define EXCEPT_LOONGARCH_BTD   20
+#define EXCEPT_LOONGARCH_BTE   21
+#define EXCEPT_LOONGARCH_GSPR  22
+#define EXCEPT_LOONGARCH_HVC   23
+#define EXCEPT_LOONGARCH_GCXC  24
 
-//
-// LoongArch processor Interrupt types.
-//
+///
+/// For coding convenience, define the maximum valid
+/// LoongArch exception.
+///
+#define MAX_LOONGARCH_EXCEPTION  64
+
+///
+/// LoongArch processor Interrupt types.
+///
 #define EXCEPT_LOONGARCH_INT_SIP0   0
 #define EXCEPT_LOONGARCH_INT_SIP1   1
 #define EXCEPT_LOONGARCH_INT_IP0    2
@@ -697,11 +748,11 @@ typedef struct {
 #define EXCEPT_LOONGARCH_INT_TIMER  11
 #define EXCEPT_LOONGARCH_INT_IPI    12
 
-//
-// For coding convenience, define the maximum valid
-// LoongArch interrupt.
-//
-#define MAX_LOONGARCH_INTERRUPT  14
+///
+/// For coding convenience, define the maximum valid
+/// LoongArch interrupt.
+///
+#define MAX_LOONGARCH_INTERRUPT  16
 
 typedef struct {
   UINT64    R0;

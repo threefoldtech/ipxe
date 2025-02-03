@@ -18,8 +18,12 @@ endif
 # EFI requires -fshort-wchar, and nothing else currently uses wchar_t
 CFLAGS		+= -fshort-wchar
 
+# Include LoongArch64-specific headers
+INCDIRS		:= arch/$(ARCH)/include $(INCDIRS)
+
 # LoongArch64-specific directories containing source files
 SRCDIRS		+= arch/loong64/core
+SRCDIRS		+= arch/loong64/interface/efi
 
 # Include platform-specific Makefile
 MAKEDEPS	+= arch/loong64/Makefile.$(PLATFORM)
